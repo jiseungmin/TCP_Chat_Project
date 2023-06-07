@@ -81,6 +81,7 @@ int main() {
 }
 
 void HandleClient(SOCKET clientSocket) {
+    FILE* fp;
     char buffer[MAX_BUFFER_SIZE];
     int bytesRead;
 
@@ -94,7 +95,15 @@ void HandleClient(SOCKET clientSocket) {
         // Null-terminate the received data
         buffer[bytesRead] = '\0'; // 수신된 데이터 널처리
 
-        printf("클라이언트 채팅: %s\n", buffer); // 수신된 데이터 출력
+        printf("%s\n", buffer); // 수신된 데이터 출력
+        fp = fopen("chat_history.txt", "a");
+        if (fp != NULL) {
+            fprintf(fp, "%s\n", buffer);
+            fclose(fp);
+        }
+        else {
+            printf("채팅 기록을 저장하는 동안 오류가 발생했습니다.\n");
+        };
 
         // Echo the received data back to the client
         send(clientSocket, buffer, bytesRead, 0); // 클라이언트에게 데이터를 다시 던져줌
