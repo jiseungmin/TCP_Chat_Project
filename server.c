@@ -14,6 +14,9 @@ typedef struct {
     SOCKET clientSocket;
 } ClientData;
 
+// 추가: 클라이언트들 간의 통신을 위한 소켓 배열
+SOCKET clientSockets[MAX_CLIENTS] = { 0 };
+
 void HandleClient(void* clientData);
 
 int main() {
@@ -64,6 +67,9 @@ int main() {
 
             printf("Client connected: %s:%d\n", inet_ntoa(serverAddr.sin_addr), ntohs(serverAddr.sin_port));
 
+            // 추가: 연결된 클라이언트 소켓을 배열에 저장
+            clientSockets[clientCount] = clientData[clientCount].clientSocket;
+
             clientThreads[clientCount] = (HANDLE)_beginthreadex(NULL, 0, (_beginthreadex_proc_type)HandleClient, (void*)&clientData[clientCount], 0, NULL);
             if (clientThreads[clientCount] == NULL) {
                 printf("Failed to create client thread.\n");
@@ -111,9 +117,21 @@ void HandleClient(void* clientData) {
         else {
             printf("채팅 기록을 저장하는 동안 오류가 발생했습니다.\n");
         }
-
-        send(clientSocket, buffer, bytesRead, 0);
+        // 추가: 받은 채팅 메시지를 다른 클라이언트들에게 전송
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clientSockets[i] != INVALID_SOCKET && clientSockets[i] != clientSocket) {
+                send(clientSockets[i], buffer, bytesRead, 0);
+            }
+        }
     }
 
+    // 클라이언트 소켓을 배열에서 제거
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clientSockets[i] == clientSocket) {
+            clientSockets[i] = INVALID_SOCKET;
+            break;
+        }
+    }
     closesocket(clientSocket);
+    _endthreadex(0);
 }

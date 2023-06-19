@@ -1,8 +1,8 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <winsock2.h>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -20,12 +20,33 @@ int openFileExplorer(const char* path) {
 #endif
 }
 
+void receiveDataThread(SOCKET sock) {
+    char server_reply[MAX_MESSAGE_LEN];
+    int recv_size;
+
+    while (1) {
+        memset(server_reply, 0, sizeof(server_reply));
+        recv_size = recv(sock, server_reply, MAX_MESSAGE_LEN, 0);
+
+        if (recv_size == SOCKET_ERROR) {
+            printf("수신 실패\n");
+            break;
+        }
+        else if (recv_size == 0) {
+            printf("서버 연결이 종료되었습니다.\n");
+            break;
+        }
+        printf("%s\n", server_reply);
+    }
+}
+
 int main() {
     WSADATA wsaData;
     SOCKET sock;
     struct sockaddr_in server;
-    char message[MAX_MESSAGE_LEN], server_reply[MAX_MESSAGE_LEN];
-    int recv_size;
+    char message[MAX_MESSAGE_LEN];
+    HANDLE receiveThread;
+    DWORD threadID;
 
     // Initialize Winsock
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -61,9 +82,9 @@ int main() {
             // 닉네임을 입력합니다.
             printf("사용하실 닉네임을 입력하세요: ");
             char nickname[100];
-            gets_s(nickname, sizeof(nickname));
+            fgets(nickname, sizeof(nickname), stdin);
+            nickname[strcspn(nickname, "\n")] = '\0';  // 개행 문자 제거
 
-            // 닉네임을 처리하는 코드를 작성하세요.
             printf("Nickname: %s\n", nickname);
             break;
 
@@ -73,7 +94,8 @@ int main() {
                 // 서버 IP 주소를 입력합니다.
                 printf("서버 IP 주소를 입력하세요: ");
                 char server_ip[100];
-                gets_s(server_ip, sizeof(server_ip));
+                fgets(server_ip, sizeof(server_ip), stdin);
+                server_ip[strcspn(server_ip, "\n")] = '\0';  // 개행 문자 제거
 
                 // Convert IPv4 address
                 server.sin_addr.s_addr = inet_addr(server_ip);
@@ -91,13 +113,23 @@ int main() {
                 }
 
                 printf("서버에 연결되었습니다.\n");
+                printf("메시지 입력 (끝내려면 q를 입력하세요): \n");
+
+                // Create a thread to receive data asynchronously
+                receiveThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)receiveDataThread, (LPVOID)sock, 0, &threadID);
 
                 while (1) {
-                    printf("메시지 입력 (끝내려면 q를 입력하세요): ");
                     fgets(message, MAX_MESSAGE_LEN, stdin);
                     message[strcspn(message, "\n")] = '\0';  // 개행 문자 제거
 
                     if (strcmp(message, "q") == 0) {
+                        // Send the "disconnect" message along with the nickname to the server
+                        char disconnect_message[MAX_MESSAGE_LEN + 100];
+                        sprintf(disconnect_message, "%s님이 채팅방에 나가셨습니다.", nickname);
+                        if (send(sock, disconnect_message, strlen(disconnect_message), 0) < 0) {
+                            printf("메시지 전송 실패\n");
+                            return 1;
+                        }
                         // Clean up the socket and Winsock
                         closesocket(sock);
                         WSACleanup();
@@ -108,6 +140,7 @@ int main() {
                     FILE* file = fopen("chat_history.txt", "a");
                     if (file != NULL) {
                         fprintf(file, "[%s] %s\n", nickname, message);
+                        fclose(file);
                     }
                     else {
                         printf("채팅 기록을 저장하는 동안 오류가 발생했습니다.\n");
@@ -116,27 +149,17 @@ int main() {
                     // Send the message to the server
                     char formatted_message[MAX_MESSAGE_LEN + 100];
                     sprintf(formatted_message, "%s: %s", nickname, message);
+                    fprintf(file, "[%s] %s\n", formatted_message);
+                    fclose(file);
                     if (send(sock, formatted_message, strlen(formatted_message), 0) < 0) {
                         printf("메시지 전송 실패\n");
                         return 1;
                     }
-
-                    // Receive response from the server
-                    memset(server_reply, 0, sizeof(server_reply));
-                    recv_size = recv(sock, server_reply, MAX_MESSAGE_LEN, 0);
-                   
-                    if (recv_size == SOCKET_ERROR) {
-                        printf("수신 실패\n");
-                        return 1;
-                    }
-                    else if (recv_size == 0) {
-                        printf("서버 연결이 종료되었습니다.\n");
-                        break;
-                    }
-                    fprintf(file, "[%s]\n", server_reply);
-                    printf("%s\n", server_reply);
-                    fclose(file);
                 }
+
+                // Wait for the receive thread to exit
+                WaitForSingleObject(receiveThread, INFINITE);
+                CloseHandle(receiveThread);
             }
             else {
                 printf("닉네임을 먼저 입력하세요.\n");
